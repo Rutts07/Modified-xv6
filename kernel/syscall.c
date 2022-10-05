@@ -101,6 +101,7 @@ extern uint64 sys_unlink(void);
 extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
+extern uint64 sys_trace(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -126,20 +127,76 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_trace]   sys_trace,
+};
+
+struct syscall_stat
+{
+    const char* sys_name;
+    const int max_args;
+};
+
+// Mapping between syscall and name for trace
+struct syscall_stat syscall_stats[] = {
+  [SYS_fork]    {"fork", 0},
+  [SYS_exit]    {"exit", 1},
+  [SYS_wait]    {"wait", 1},
+  [SYS_pipe]    {"pipe", 0},
+  [SYS_read]    {"read", 3},
+  [SYS_kill]    {"kill", 2},
+  [SYS_exec]    {"exec", 2},
+  [SYS_fstat]   {"fstat", 1},
+  [SYS_chdir]   {"chdir", 1},
+  [SYS_dup]     {"dup", 1},
+  [SYS_getpid]  {"getpid", 0},
+  [SYS_sbrk]    {"sbrk", 1},
+  [SYS_sleep]   {"sleep", 1},
+  [SYS_uptime]  {"uptime", 0},
+  [SYS_open]    {"open", 2},
+  [SYS_write]   {"write", 3},
+  [SYS_mknod]   {"mknod", 3},
+  [SYS_unlink]  {"unlink", 1},
+  [SYS_link]    {"link", 2},
+  [SYS_mkdir]   {"mkdir", 1},
+  [SYS_close]   {"close", 1},
+  [SYS_trace]   {"trace", 1},
 };
 
 void
 syscall(void)
 {
   int num;
+  uint64 arg_int;
   struct proc *p = myproc();
 
   num = p->trapframe->a7;
-  if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+  if(num > 0 && num < NELEM(syscalls) && syscalls[num]) 
+  {
+    arg_int = argraw(0);
+
     // Use num to lookup the system call function for num, call it,
     // and store its return value in p->trapframe->a0
-    p->trapframe->a0 = syscalls[num]();
-  } else {
+    p->trapframe->a0 = syscalls[num]();  
+
+    // return trace for all syscalls that return
+    if (p->tracemask & (1 << num)) 
+    {
+	    printf("%d: syscall %s (", p->pid, syscall_stats[num].sys_name);
+      
+      if (syscall_stats[num].max_args > 0) 
+      {
+        printf("%d", arg_int);
+        
+        for(int i = 1; i < syscall_stats[num].max_args; i++)
+          printf(" %d", argraw(i));
+      }
+
+      printf(") -> %d\n", p->trapframe->a0);
+    }
+  }
+
+  else 
+  {
     printf("%d %s: unknown sys call %d\n",
             p->pid, p->name, num);
     p->trapframe->a0 = -1;

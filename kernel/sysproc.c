@@ -89,3 +89,11 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_trace(void)
+{
+  // set the tracemask to the first argument of the syscall
+  argint(0, &myproc()->tracemask);
+  return 0;
+}

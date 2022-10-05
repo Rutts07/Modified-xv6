@@ -22,6 +22,7 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int trace(int);    // API for 'trace' syscall
 
 // ulib.c
 int stat(const char*, struct stat*);
