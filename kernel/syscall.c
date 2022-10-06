@@ -160,6 +160,8 @@ struct syscall_stat syscall_stats[] = {
   [SYS_mkdir]   {"mkdir", 1},
   [SYS_close]   {"close", 1},
   [SYS_trace]   {"trace", 1},
+  [SYS_sigalarm] {"sigalarm", 2},
+  [SYS_sigreturn] {"sigreturn", 0},
 };
 
 void
