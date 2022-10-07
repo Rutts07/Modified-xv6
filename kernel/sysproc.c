@@ -97,3 +97,46 @@ sys_trace(void)
   argint(0, &myproc()->tracemask);
   return 0;
 }
+
+uint64
+sys_sigalarm(void)
+{
+  int ticks;
+  uint64 handler;
+
+  argint(0, &ticks);
+  argaddr(1, &handler);
+
+  acquire(&myproc()->lock);
+
+  myproc()->alarm = 0;
+  myproc()->curticks = 0;
+  myproc()->ticks = ticks;
+  myproc()->handler = handler;
+
+  release(&myproc()->lock);
+
+  // printf("ticks: %d, handler: %p\n", ticks, handler);
+
+  return 0;
+}
+
+
+uint64
+sys_sigreturn(void)
+{
+  struct proc *p = myproc();
+  acquire(&p->lock);
+
+  // resume the process from the signal handler
+  memmove(p->trapframe, p->trapframe_backup, PGSIZE);
+  kfree(p->trapframe_backup);
+
+  p->trapframe_backup = 0;
+  p->curticks = 0;
+  p->alarm = 0;
+
+  release(&p->lock);
+
+  return 0;
+}

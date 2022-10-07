@@ -22,7 +22,9 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
-int trace(int);    // API for 'trace' syscall
+int trace(int);                                 // API for 'trace' syscall
+int sigalarm(int ticks, void (*handler)());     // API for 'sigalarm' syscall
+int sigreturn(void);                            // API for 'sigreturn' syscall
 
 // ulib.c
 int stat(const char*, struct stat*);

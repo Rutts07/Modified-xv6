@@ -105,4 +105,11 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // modified structure to implement sigalarm & sigreturn
+  struct trapframe *trapframe_backup; // backup trapframe
+  uint64 handler;                     // handler address
+  int alarm;                          // alarm signal
+  int ticks;                          // ticks to interrupt
+  int curticks;                       // current ticks
 };
