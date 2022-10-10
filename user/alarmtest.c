@@ -173,8 +173,7 @@ test3()
 
   asm volatile("lui a5, 0");
   asm volatile("addi a0, a5, 0xac" : : : "a0");
-  for(int i = 0; i < 500000000; i++)
-    ;
+  for(int i = 0; i < 500000000; i++);
   asm volatile("mv %0, a0" : "=r" (a0) );
 
   // printf("%d %d\n", a0, 0xac);

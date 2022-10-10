@@ -144,6 +144,9 @@ found:
   p->alarm = 0;
   p->ticks = 0;
 
+  // initialise ticks for each process for FCFS
+  p->c_time = ticks;
+
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -474,6 +477,7 @@ scheduler(void)
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
 
+  #ifdef RR
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
@@ -490,6 +494,43 @@ scheduler(void)
       }
       release(&p->lock);
     }
+  #endif
+
+  #ifdef FCFS
+    struct proc *next = 0;
+    for(p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if(p->state == RUNNABLE)
+      {
+        // choose the process with the earliest creation time
+        if(next == 0 || p->c_time < next->c_time)
+        {
+          if (next != 0)
+            release(&next->lock);
+
+          // Don't release the lock of the chosen process, unless a better process is found
+          next = p;
+          continue;
+        }
+      }
+
+      release(&p->lock);
+    }
+
+    if (next == 0)
+      continue;
+
+    // Lock already acquired
+    next->state = RUNNING;
+    c->proc = next;
+
+    swtch(&c->context, &next->context);
+
+    // Process is done running for now.
+    // It should have changed its p->state before coming back.  
+    c->proc = 0;
+    release(&next->lock);
+  #endif
   }
 }
 

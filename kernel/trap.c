@@ -83,8 +83,8 @@ void usertrap(void)
   // give up the CPU if this is a timer interrupt.
   if (which_dev == 2)
   {
-    acquire(&p->lock);
     p->curticks += 1;
+
     if (p->ticks != 0 && p->curticks == p->ticks && p->alarm == 0)
     {
       p->alarm = 1;
@@ -92,16 +92,16 @@ void usertrap(void)
       p->curticks = 0;
 
       // take a backup of the trapframe
-      struct trapframe * trapframe_copy = (struct trapframe *)kalloc();
-      memmove(trapframe_copy, p->trapframe, PGSIZE);
-
-      p->trapframe_backup = trapframe_copy;
+      p->trapframe_backup = (struct trapframe *)kalloc();
+      memmove(p->trapframe_backup, p->trapframe, PGSIZE);
 
       // transfer control to the user sigalarm handler
       p->trapframe->epc = p->handler;
     }
-    release(&p->lock);
+    
+    #ifdef RR
     yield();
+    #endif
   }
 
   usertrapret();
@@ -175,7 +175,9 @@ void kerneltrap()
 
   // give up the CPU if this is a timer interrupt.
   if (which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
+    #ifdef RR
     yield();
+    #endif
 
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.

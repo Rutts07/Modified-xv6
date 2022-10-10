@@ -182,6 +182,7 @@ syscall(void)
 
     // Use num to lookup the system call function for num, call it,
     // and store its return value in p->trapframe->a0
+    // p->trapframe_backup->a0 = p->trapframe->a0;
     p->trapframe->a0 = syscalls[num]();  
 
     // return trace for all syscalls that return
