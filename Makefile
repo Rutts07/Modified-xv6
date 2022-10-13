@@ -63,6 +63,19 @@ CFLAGS += -ffreestanding -fno-common -nostdlib -mno-relax
 CFLAGS += -I.
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
 
+# Scheduler arguments
+ifeq ($(SCHEDULER), FCFS)
+    CFLAGS += -D FCFS
+else ifeq ($(SCHEDULER), LBS)
+    CFLAGS += -D LBS
+else ifeq ($(SCHEDULER), PBS)
+    CFLAGS += -D PBS
+else ifeq ($(SCHEDULER), MLFQ)
+	CFLAGS += -D MLFQ
+else
+	CFLAGS += -D RR
+endif
+
 # Disable PIE when possible (for Ubuntu 16.10 toolchain)
 ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]no-pie'),)
 CFLAGS += -fno-pie -no-pie
@@ -70,19 +83,6 @@ endif
 ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]nopie'),)
 CFLAGS += -fno-pie -nopie
 endif
-
-# Scheduler arguments
-SCHEDULER_MACRO = -D RR
-ifeq ($(SCHEDULER), FCFS)
-    SCHEDULER_MACRO = -D FCFS
-endif
-ifeq ($(SCHEDULER), PBS)
-    SCHEDULER_MACRO = -D PBS
-endif
-ifeq ($(SCHEDULER), MLFQ)
-    SCHEDULER_MACRO = -D MLFQ
-endif
-CFLAGS += $(SCHEDULER_MACRO)
 
 LDFLAGS = -z max-page-size=4096
 
@@ -149,6 +149,7 @@ UPROGS=\
 	$U/_clear\
 	$U/_alarmtest\
 	$U/_schedulertest\
+	$U/_setpriority\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
@@ -187,4 +188,3 @@ qemu: $K/kernel fs.img
 qemu-gdb: $K/kernel .gdbinit fs.img
 	@echo "*** Now run 'gdb' in another window." 1>&2
 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
-

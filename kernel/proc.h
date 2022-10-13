@@ -111,6 +111,46 @@ struct proc {
   int alarm;                          // alarm signal
   int ticks;                          // ticks to interrupt
   int curticks;                       // current ticks
+  
   int tracemask;                      // Trace points to trace
+
   int c_time;                         // creation time
+  int e_time;                         // end time
+
+  int t_runtime;                      // total runtime
+  int t_waitime;                      // total wait time
+
+  #ifdef LBS
+  int tickets;                        // tickets for lottery scheduler
+  #endif
+
+  #ifdef PBS
+  int priority;                       // priority for priority scheduler
+  int scheduled;                      // number of times scheduled
+  int runtime;                        // runtime for priority scheduler
+  int waitime;                        // waitime for priority scheduler
+  #endif
+
+  #ifdef MLFQ
+  int priority;                       // priority for priority scheduler
+  int in_time;                        // time when process entered queue
+  int rem_ticks;                      // remaining ticks in current queue
+  int change_queue;                   // flag to change queue due to starvation
+  int q_ticks[MAX_QUEUES];            // time spent in each queue
+  #endif
 };
+
+#ifdef MLFQ
+struct Queue 
+{
+  int head, tail;
+  struct proc *procs[NPROC + 1];
+  int size;
+};
+
+// funtions to manipulate the multilevel feedback queue
+void enqueue(struct Queue *q, struct proc *p);            // add a process to the queue
+struct proc *top(struct Queue *q);                        // choose a process from the queue head to schedule
+void pop(struct Queue *q);                                // changes the head of the queue
+void dequeue(struct Queue *q, struct proc *p);            // remove a process from the queue
+#endif

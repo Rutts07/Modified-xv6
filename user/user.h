@@ -25,6 +25,9 @@ int uptime(void);
 int trace(int);                                 // API for 'trace' syscall
 int sigalarm(int ticks, void (*handler)());     // API for 'sigalarm' syscall
 int sigreturn(void);                            // API for 'sigreturn' syscall
+int settickets(int);                            // API for 'settickets' syscall only for LBS
+int set_priority(int, int);                     // API for 'set_priority' syscall only for PBS
+int waitx(int*, int*, int*);                    // API for 'waitx' syscall
 
 // ulib.c
 int stat(const char*, struct stat*);

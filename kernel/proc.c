@@ -10,6 +10,56 @@ struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 
+#ifdef MLFQ
+struct Queue queue[MAX_QUEUES];
+
+void enqueue(struct Queue *q, struct proc *p)
+{
+  if (q->size == NPROC)
+    panic("Queue is full");
+
+  q->procs[q->tail] = p;
+  q->tail = (q->tail + 1) % (NPROC + 1);
+  q->size++;
+}
+
+struct proc *top(struct Queue *q)
+{
+  if (q->head == q->tail)
+    return 0;
+
+  return q->procs[q->head];
+}
+
+void pop(struct Queue *q)
+{
+  if (q->size == 0)
+    panic("Queue is empty");
+
+  q->head = (q->head + 1) % (NPROC +1);
+  q->size--;
+}
+
+void dequeue(struct Queue *q, struct proc *p)
+{
+  // find the process in the queue
+  for (int i = q->head; i != q->tail; i = (i + 1) % (NPROC + 1))
+  {
+    if (q->procs[i]->pid == p->pid)
+    {
+      // shift all the processes after the process to be removed
+      for (int j = i; j != q->tail; j = (j + 1) % NPROC)
+        q->procs[j] = q->procs[(j + 1) % NPROC];
+
+      q->tail = q->tail - 1 < 0 ? NPROC : q->tail - 1;
+      q->size--;
+      
+      return;
+    }
+  }
+}
+#endif
+
 struct proc *initproc;
 
 int nextpid = 1;
@@ -51,11 +101,22 @@ procinit(void)
   
   initlock(&pid_lock, "nextpid");
   initlock(&wait_lock, "wait_lock");
+
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
       p->state = UNUSED;
       p->kstack = KSTACK((int) (p - proc));
   }
+
+  // Initialize the MLFQ
+  #ifdef MLFQ
+  for(int i = 0; i < MAX_QUEUES; i++){
+    // queue[i] = 
+    queue[i].head = 0;
+    queue[i].tail = 0;
+    queue[i].size = 0;
+  }
+  #endif
 }
 
 // Must be called with interrupts disabled,
@@ -147,6 +208,29 @@ found:
   // initialise ticks for each process for FCFS
   p->c_time = ticks;
 
+  #ifdef PBS
+  p->priority = 60;
+  p->scheduled = 0;
+  p->runtime = 0;
+  p->waitime = 0;
+  #endif
+
+  #ifdef LBS
+  p->tickets = 1;
+  #endif
+
+  // Push the process to the lowest (highest priority) queue
+  #ifdef MLFQ
+  p->priority = 0;
+  p->change_queue = 1;    // flag 1 because the process is new
+  p->rem_ticks = 1 << p->priority;
+  p->in_time = ticks;
+
+  for(int i = 0; i < MAX_QUEUES; i++){
+    p->q_ticks[i] = 0;
+  }
+  #endif
+
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -191,7 +275,113 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  p->curticks = 0;
+  p->handler = 0;
+  p->alarm = 0;
+  p->ticks = 0;
+
+  p->c_time = 0;
+  p->e_time = 0;
+
+  p->t_runtime = 0;
+  p->t_waitime = 0;
+
+  #ifdef PBS
+  p->priority = 60;
+  p->scheduled = 0;
+  p->runtime = 0;
+  p->waitime = 0;
+  #endif
+
+  #ifdef LBS
+  p->tickets = 1;
+  #endif
+
+  #ifdef MLFQ
+  p->priority = 0;
+  p->change_queue = 0;
+  p->rem_ticks = 1;
+  p->in_time = 0;
+  #endif
 }
+
+// Update process' runtime and waitime variables for PBS
+void update_time(void)
+{
+  struct proc *p;
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+
+    if (p->state == RUNNING)
+    {
+      p->t_runtime++;
+
+      #ifdef PBS
+      p->runtime += 1;
+      #endif
+
+      #ifdef MLFQ
+      p->q_ticks[p->priority] += 1;
+      p->rem_ticks -= 1;
+      #endif
+    }
+
+    else if (p->state == SLEEPING)
+    {
+      #ifdef PBS
+      p->waitime += 1;
+      #endif
+    }
+
+    release(&p->lock);
+  }
+}
+
+#ifdef PBS
+int dynamic_priority(struct proc *p)
+{
+  int niceness, d_priority;
+
+  // Niceness equal 5 for new processes
+  if (p->runtime == 0 && p->waitime == 0)
+    niceness = 5;
+
+  else
+    niceness = p->waitime * 10 / (p->runtime + p->waitime);
+  
+  d_priority = p->priority - niceness + 5;
+  d_priority = (d_priority > 100) ? 100 : d_priority;
+  d_priority = (d_priority < 0) ? 0 : d_priority;
+
+  return d_priority;
+}
+
+int set_priority(int priority, int pid)
+{
+  struct proc *p;
+  int old_priority = -1;
+
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    if (p->pid == pid)
+    {
+      acquire(&p->lock);
+      old_priority = p->priority;
+      p->priority = priority;
+      p->runtime = 0;
+      release(&p->lock);
+      
+      // Yield if the process acquires a higher priority
+      if (old_priority > priority)
+        yield();
+    }
+  }
+
+  return old_priority;
+}
+#endif
 
 // Create a user page table for a given process, with no user memory,
 // but with trampoline and trapframe pages.
@@ -327,6 +517,11 @@ fork(void)
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
 
+  #ifdef LBS
+  // Copy parent's tickets to child
+  np->tickets = p->tickets;
+  #endif
+
   // increment reference counts on open file descriptors.
   for(i = 0; i < NOFILE; i++)
     if(p->ofile[i])
@@ -402,6 +597,7 @@ exit(int status)
 
   p->xstate = status;
   p->state = ZOMBIE;
+  p->e_time = ticks;
 
   release(&wait_lock);
 
@@ -531,6 +727,223 @@ scheduler(void)
     c->proc = 0;
     release(&next->lock);
   #endif
+
+  #ifdef LBS
+    struct proc *next = 0;
+    for(p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if(p->state == RUNNABLE)
+      {
+        // choose the process with the highest number of tickets
+        if(next == 0 || p->tickets >= next->tickets)
+        {
+          if (next == 0)
+          {
+            next = p;
+            continue;
+          }
+
+          // If the tickets are equal
+          if (p->tickets == next->tickets)
+          {
+            // If the number of tickets is the same, choose the process with the earliest creation time
+            if (p->c_time < next->c_time)
+            {
+              release(&next->lock);
+              next = p;
+              continue;
+            }
+
+            release(&p->lock);
+            continue;
+          }
+
+          // Don't release the lock of the chosen process, unless a better process is found
+          release(&next->lock);
+          next = p;
+          continue;
+        }
+      }
+      release(&p->lock);
+    }
+
+    if (next == 0)
+      continue;
+
+    // Lock already acquired
+    next->state = RUNNING;
+    c->proc = next;
+
+    swtch(&c->context, &next->context);
+
+    // Process is done running for now.
+    // It should have changed its p->state before coming back.  
+    c->proc = 0;
+    release(&next->lock);
+  #endif
+
+  #ifdef PBS
+    struct proc *next = 0;
+    for(p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if(p->state == RUNNABLE)
+      {
+        // choose the process with the lowest priority
+        if(next == 0 || dynamic_priority(p) <= dynamic_priority(next))
+        {
+          if (next == 0)
+          {
+            next = p;
+            continue;
+          }
+
+          // If the priorities are equal
+          if (dynamic_priority(p) == dynamic_priority(next))
+          {
+            // choose the process scheduled less
+            if (p->scheduled <= next->scheduled)
+            {
+              // If the number of times the processes have been scheduled is the same
+              if (p->scheduled == next->scheduled)
+              {
+                // choose the process with the latest creation time
+                if (p->c_time > next->c_time)
+                {
+                  release(&next->lock);
+                  next = p;
+                  continue;
+                }
+
+                // if the creation times are equal or the process with the latest creation time is already chosen
+                release(&p->lock);
+                continue;
+              }
+
+              release(&next->lock);
+              next = p;
+              continue;
+            }
+
+            // if the process with the least number of times scheduled is already chosen
+            release(&p->lock);
+            continue;
+          }
+
+          release(&next->lock);
+          next = p;
+          continue;
+        }
+      }
+
+      release(&p->lock);
+    }
+
+    if (next == 0)
+      continue;
+
+    // Lock already acquired
+    next->state = RUNNING;
+    next->scheduled = next->scheduled + 1;
+    
+    // Reset and Re-calculate runtime and wait time
+    next->runtime = 0;
+    next->waitime = 0;
+    c->proc = next;
+
+    swtch(&c->context, &next->context);
+
+    // Process is done running for now.
+    // It should have changed its p->state before coming back.  
+    c->proc = 0;
+    release(&next->lock);
+  #endif
+
+  #ifdef MLFQ
+    struct proc *next = 0;
+
+    // Check for starvation
+    for(p = proc; p < &proc[NPROC]; p++){
+      acquire(&p->lock);
+
+      // If the process has been waiting for too long
+      if(p->state == RUNNABLE && (ticks - p->in_time >= MAX_SLICES))
+      {
+        dequeue(&queue[p->priority], p);
+
+        // Promote it to a lower queue and reset entry time
+        if (p->priority > 0)
+          p->priority = p->priority - 1;
+
+        p->change_queue = 1;
+      }
+
+      release(&p->lock);
+    }
+
+    // Update the queue for all process that need a queue change
+    for(p = proc; p < &proc[NPROC]; p++){
+      acquire(&p->lock);
+
+      if(p->state == RUNNABLE && p->change_queue == 1)
+      {
+        enqueue(&queue[p->priority], p);
+        p->change_queue = 0;
+      }
+
+      release(&p->lock);
+    }
+
+    // Choose a process from the highest non-empty priority queue
+    for (int i = 0; i < MAX_QUEUES; i++)
+    {
+      // Run this queue, until it empties
+      while (queue[i].size > 0)
+      {
+        p = top(&queue[i]);
+
+        if (p == 0)
+          continue;
+
+        acquire(&p->lock);
+        
+        // Remove the process from the queue, the process can be sleeping also
+        dequeue(&queue[i], p);
+        p->change_queue = 1;
+        
+        if (p->state == RUNNABLE)
+        {
+          // Don't release the lock of the chosen process
+          p->in_time = ticks;
+          next = p;
+          break;
+        }
+
+        release(&p->lock);
+      }
+
+      if (next != 0)
+        break;
+    }
+
+    if (next == 0)
+      continue;
+
+    // Lock already acquired
+    // Allot the process a time slice (equal to bit shift of its priority)
+    next->rem_ticks = 1 << next->priority;
+    next->state = RUNNING;
+    
+    // Reset and Re-calculate runtime and wait time
+    c->proc = next;
+
+    swtch(&c->context, &next->context);
+
+    // Process is done running for now.
+    // It should have changed its p->state before coming back.  
+    c->proc = 0;
+    next->in_time = ticks;
+    release(&next->lock);
+  #endif
   }
 }
 
@@ -622,6 +1035,60 @@ sleep(void *chan, struct spinlock *lk)
   // Reacquire original lock.
   release(&p->lock);
   acquire(lk);
+}
+
+int waitx(uint64 addr, int *rtime, int *wtime)
+{
+  struct proc *np;
+  int havekids, pid;
+  struct proc *p = myproc();
+
+  acquire(&wait_lock);
+
+  for (;;)
+  {
+    // Scan through table looking for exited children.
+    havekids = 0;
+    for (np = proc; np < &proc[NPROC]; np++)
+    {
+      if (np->parent == p)
+      {
+        // make sure the child isn't still in exit() or swtch().
+        acquire(&np->lock);
+
+        havekids = 1;
+        if (np->state == ZOMBIE)
+        {
+          // Found one.
+          pid = np->pid;
+          *rtime = np->t_runtime;
+          *wtime = np->e_time - np->c_time - np->t_runtime;
+          if (addr != 0 && copyout(p->pagetable, addr, (char *)&np->xstate,
+                                   sizeof(np->xstate)) < 0)
+          {
+            release(&np->lock);
+            release(&wait_lock);
+            return -1;
+          }
+          freeproc(np);
+          release(&np->lock);
+          release(&wait_lock);
+          return pid;
+        }
+        release(&np->lock);
+      }
+    }
+
+    // No point waiting if we don't have any children.
+    if (!havekids || p->killed)
+    {
+      release(&wait_lock);
+      return -1;
+    }
+
+    // Wait for a child to exit.
+    sleep(p, &wait_lock); // DOC: wait-sleep
+  }
 }
 
 // Wake up all processes sleeping on chan.
