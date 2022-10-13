@@ -362,11 +362,16 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
+
+    // set parent's page unwritable and give it COW flag
+    *pte |= PTE_COW;
+    *pte &= (~PTE_W);
+
     flags |= (PTE_COW);   // add the COW flag to the page. So it is copy-on-write.
     flags &= (~PTE_W);    // remove the Write flag from the page. So only readable.
 
     // map the parent’s physical pages into the child
-    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){ 
       //kfree(mem);
       goto err;
     }
@@ -385,6 +390,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     }
   }
   err:
+  uvmunmap(new, 0, i / PGSIZE, 1);
     return(-1);
 }
 /////////////////////////////

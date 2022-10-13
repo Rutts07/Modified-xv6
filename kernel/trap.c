@@ -74,30 +74,11 @@ void usertrap(void)
     // and install the new page in the PTE with PTE_W set.
 
     // Get physial page address and correct flags.
-    uint64 start_va = PGROUNDDOWN(r_stval());
+    uint64 va = r_stval();
     pte_t *pte;
-    pte = walk(p->pagetable, start_va, 0);
-    if (pte == 0) {
-      panic("Page not found\n");
-      p->killed = 1;
-    }
-    else if ((*pte & PTE_V) && (*pte & PTE_U) && (*pte & PTE_COW)) {
-      uint flags = PTE_FLAGS(*pte);
-      // +Write, -COW
-      flags |= PTE_W;
-      flags &= (~PTE_COW);
 
-      char *mem = kalloc();
-      char *pa = (char *)PTE2PA(*pte);
-      memmove(mem, pa, PGSIZE);
-      uvmunmap(p->pagetable, start_va, PGSIZE, 0);
-      // decrement old pa ref count.
-      dec_ref((void*)pa);
-      if (mappages(p->pagetable, start_va, PGSIZE, (uint64)mem, flags) != 0) {
-        p->killed = 1;
-        panic("ERROR in Trap while mapping.\n");
-      }
-    }
+    if(cowcopy(va) == - 1)
+      p->killed = 1; 
   }
 
   else if ((which_dev = devintr()) != 0)
@@ -286,4 +267,42 @@ int devintr()
   {
     return 0;
   }
+}
+
+int
+cowcopy(uint64 va){
+  va = PGROUNDDOWN(va);
+  pagetable_t p = myproc()->pagetable;
+  pte_t* pte = walk(p, va, 0);
+  uint64 pa = PTE2PA(*pte);
+  uint flags = PTE_FLAGS(*pte);
+
+  if(!(flags & PTE_COW))
+  {
+    panic("Not Cow\n");
+    return -2; // not cow page
+  }
+
+  acquire_refcnt();
+  uint ref = refcnt_getter(pa);
+  if(ref > 1) {// ref  1, alloc a new page
+    char* mem = kalloc_initialise();
+    if(mem == 0)
+      goto bad;
+    memmove(mem, (char*)pa, PGSIZE);
+    if(mappages(p, va, PGSIZE, (uint64)mem, (flags & (~PTE_COW)) | PTE_W) !=0){
+      kfree(mem);
+      goto bad;
+    }
+    refcnt_setter(pa, ref - 1);
+  }else{
+    // ref = 1, use this page directly
+    *pte = ((*pte) & (~PTE_COW)) | PTE_W;
+  }
+  release_refcnt();
+  return 0;
+
+  bad:
+  release_refcnt();
+  return -1;
 }

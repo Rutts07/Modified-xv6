@@ -63,6 +63,14 @@ void            ramdiskrw(struct buf*);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
+uint64 pgindex(uint64 pa);
+void acquire_refcnt();
+void release_refcnt();
+void refcnt_setter(uint64 pa, int n);
+uint refcnt_getter(uint64 pa);
+void refcnt_incr(uint64 pa, int n);
+void * kalloc_initialise(void);
+
 
 // log.c
 void            initlog(int, struct superblock*);
