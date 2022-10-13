@@ -140,6 +140,7 @@ kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 // be page-aligned. Returns 0 on success, -1 if walk() couldn't
 // allocate a needed page-table page.
 int
+    // if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
 mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 {
   uint64 a, last;
@@ -185,6 +186,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not a leaf");
     if(do_free){
       uint64 pa = PTE2PA(*pte);
+      // don't we have to check if refCount is 0?
       kfree((void*)pa);
     }
     *pte = 0;
@@ -302,35 +304,93 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 // physical memory.
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
+
+// ORIGINAL. no COW
+// int
+// uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+// {
+//   pte_t *pte;
+//   uint64 pa, i;
+//   uint flags;
+//   char *mem;
+
+//   for(i = 0; i < sz; i += PGSIZE){
+//     if((pte = walk(old, i, 0)) == 0)
+//       panic("uvmcopy: pte should exist");
+//     if((*pte & PTE_V) == 0)
+//       panic("uvmcopy: page not present");
+    
+//     // pa is teh address of the page.
+//     pa = PTE2PA(*pte);
+//     flags = PTE_FLAGS(*pte);
+//     if((mem = kalloc()) == 0)
+//       goto err;
+    
+//     // This basically stores mem in that page (pointed by pa). The page has content for 4kb.
+//     // Turns out, kalloc just stores junk in mem!
+//     memmove(mem, (char*)pa, PGSIZE);
+
+//     // mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
+//     if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+//       kfree(mem);
+//       goto err;
+//     }
+//   }
+//   return 0;
+
+//  err:
+//   uvmunmap(new, 0, i / PGSIZE, 1);
+//   return -1;
+// }
+
+// Modified uvmcopy to implement copy-on-write fork
+/////////////////////////////
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  char *mem; 
 
+  // we are getting each entry in the Page table (PTE) through walk
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
+    flags |= (PTE_COW);   // add the COW flag to the page. So it is copy-on-write.
+    flags &= (~PTE_W);    // remove the Write flag from the page. So only readable.
+
+    // map the parent’s physical pages into the child
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+      //kfree(mem);
       goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    }
+
+    // We maintain a count of the number of virtual pgs mapped to each physical pg.
+    // so increment that.
+    add_ref((void*)pa);
+    
+    // The parent table addresses still show it as a Write page. We need to clear that and re-map it.
+    // Hence, we remove parent page table mapping.
+    uvmunmap(old, i, PGSIZE, 0);
+
+    // and then re-map the parent page table
+    if (mappages(old, i, PGSIZE, pa, flags) != 0) {
       goto err;
     }
   }
-  return 0;
-
- err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
-  return -1;
+  err:
+    return(-1);
 }
+/////////////////////////////
+
+
+
 
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.
