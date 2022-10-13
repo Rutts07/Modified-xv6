@@ -11,6 +11,10 @@ uint ticks;
 
 extern char trampoline[], uservec[], userret[];
 
+#ifdef MLFQ
+extern struct Queue queue[MAX_QUEUES];
+#endif
+
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
@@ -114,10 +118,43 @@ void usertrap(void)
       p->trapframe->epc = p->handler;
     }
     
+    // Only pre-empt for RR & LBS Scheduler
     #ifdef RR
-    yield();
+      yield();
+    #endif
+
+    #ifdef LBS
+      yield();
     #endif
   }
+
+  #ifdef MLFQ
+  if (which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
+  {
+    // check if the process has exceeded its time quanta of the current queue
+    if (myproc()->rem_ticks <= 0)
+    {
+      myproc()->change_queue = 1;
+
+      if (myproc()->priority < MAX_QUEUES - 1)
+        myproc()->priority += 1;
+      
+      myproc()->rem_ticks = (1 << myproc()->priority);
+      yield();
+    }
+
+    // check if the higher priority queues have any processes
+    // if priority == 0, no preemption until time quanta -> hence round robin for lowest queue
+    for (int i = 0; i < myproc()->priority; i++)
+    {
+      if (queue[i].size != 0)
+      {
+        yield();
+        break;
+      }
+    }
+  }
+  #endif
 
   usertrapret();
 }
@@ -190,9 +227,40 @@ void kerneltrap()
 
   // give up the CPU if this is a timer interrupt.
   if (which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
+  {
     #ifdef RR
     yield();
     #endif
+
+    #ifdef LBS
+    yield();
+    #endif
+
+    #ifdef MLFQ
+    if (myproc()->rem_ticks <= 0)
+    {
+      myproc()->change_queue = 1;
+
+      if (myproc()->priority < MAX_QUEUES - 1)
+      {
+        myproc()->priority += 1;
+        // myproc()->rem_ticks = (1 << myproc()->priority);
+      }
+
+      yield();
+    }
+
+    // check if the higher priority queues have any processes
+    for (int i = 0; i < myproc()->priority; i++)
+    {
+      if (queue[i].size != 0)
+      {
+        yield();
+        break;
+      }
+    }
+    #endif
+  }
 
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.
@@ -204,6 +272,9 @@ void clockintr()
 {
   acquire(&tickslock);
   ticks++;
+
+  update_time();
+  
   wakeup(&ticks);
   release(&tickslock);
 }
