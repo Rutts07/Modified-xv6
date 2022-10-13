@@ -139,7 +139,9 @@ kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 // physical addresses starting at pa. va and size might not
 // be page-aligned. Returns 0 on success, -1 if walk() couldn't
 // allocate a needed page-table page.
+/*
 int
+    // if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
 mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 {
   uint64 a, last;
@@ -155,6 +157,28 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
       return -1;
     if(*pte & PTE_V)
       panic("mappages: remap");
+    *pte = PA2PTE(pa) | perm | PTE_V;
+    if(a == last)
+      break;
+    a += PGSIZE;
+    pa += PGSIZE;
+  }
+  return 0;
+}
+*/
+int
+mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
+{
+  uint64 a, last;
+  pte_t *pte;
+
+  a = PGROUNDDOWN(va);
+  last = PGROUNDDOWN(va + size - 1);
+  for(;;){
+    if((pte = walk(pagetable, a, 1)) == 0)
+      return -1;
+    // if(*pte & PTE_V)
+    //   panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
@@ -302,35 +326,90 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 // physical memory.
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
+
+// ORIGINAL. no COW
+// int
+// uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+// {
+//   pte_t *pte;
+//   uint64 pa, i;
+//   uint flags;
+//   char *mem;
+
+//   for(i = 0; i < sz; i += PGSIZE){
+//     if((pte = walk(old, i, 0)) == 0)
+//       panic("uvmcopy: pte should exist");
+//     if((*pte & PTE_V) == 0)
+//       panic("uvmcopy: page not present");
+    
+//     // pa is teh address of the page.
+//     pa = PTE2PA(*pte);
+//     flags = PTE_FLAGS(*pte);
+//     if((mem = kalloc()) == 0)
+//       goto err;
+    
+//     // This basically stores mem in that page (pointed by pa). The page has content for 4kb.
+//     // Turns out, kalloc just stores junk in mem!
+//     memmove(mem, (char*)pa, PGSIZE);
+
+//     // mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
+//     if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+//       kfree(mem);
+//       goto err;
+//     }
+//   }
+//   return 0;
+
+//  err:
+//   uvmunmap(new, 0, i / PGSIZE, 1);
+//   return -1;
+// }
+
+// Modified uvmcopy to implement copy-on-write fork
+/////////////////////////////
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
+  // we are getting each entry in the Page table (PTE) through walk
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+
+    // set parent's page unwritable and give it COW flag
+    *pte |= PTE_COW;
+    *pte &= (~PTE_W);
+
+    flags |= (PTE_COW);   // add the COW flag to the page. So it is copy-on-write.
+    flags &= (~PTE_W);    // remove the Write flag from the page. So only readable.
+
+    // map the parent’s physical pages into the child
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){ 
+      //kfree(mem);
       goto err;
     }
-  }
-  return 0;
 
- err:
+    // We maintain a count of the number of virtual pgs mapped to each physical pg.
+    // so increment that.
+    refcnt_incr(pa,1);    
+    }
+    return 0;
+  err:
   uvmunmap(new, 0, i / PGSIZE, 1);
-  return -1;
+    return(-1);
 }
+/////////////////////////////
+
+
+
 
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.
@@ -348,6 +427,7 @@ uvmclear(pagetable_t pagetable, uint64 va)
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
+/*
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
@@ -367,6 +447,40 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     src += n;
     dstva = va0 + PGSIZE;
   }
+  return 0;
+}
+*/
+int
+copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
+{
+  uint64 n, va0, pa0;
+
+  while(len > 0){
+    va0 = PGROUNDDOWN(dstva);
+
+    if(va0 >= MAXVA)
+      return -1;
+    pte_t* pte = walk(pagetable, va0, 0);
+    if(pte && (*pte & PTE_COW) != 0){
+      // cow page
+      if(cowcopy(va0) != 0){
+        return -1;
+      }
+    }
+    pa0 = walkaddr(pagetable, va0);
+
+    if(pa0 == 0)
+      return -1;
+    n = PGSIZE - (dstva - va0);
+    if(n > len)
+      n = len;
+    memmove((void *)(pa0 + (dstva - va0)), src, n);
+
+    len -= n;
+    src += n;
+    dstva = va0 + PGSIZE;
+  }
+  
   return 0;
 }
 
