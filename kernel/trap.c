@@ -65,41 +65,6 @@ void usertrap(void)
     syscall();
   }
 
-
-  else if (r_scause() == 15) 
-  {
-    // Modify usertrap() to recognize page faults.
-    // When a page-fault occurs on a COW page, allocate a new page with kalloc(),
-    // copy the old page to the new page,
-    // and install the new page in the PTE with PTE_W set.
-
-    // Get physial page address and correct flags.
-    uint64 start_va = PGROUNDDOWN(r_stval());
-    pte_t *pte;
-    pte = walk(p->pagetable, start_va, 0);
-    if (pte == 0) {
-      panic("Page not found\n");
-      p->killed = 1;
-    }
-    else if ((*pte & PTE_V) && (*pte & PTE_U) && (*pte & PTE_COW)) {
-      uint flags = PTE_FLAGS(*pte);
-      // +Write, -COW
-      flags |= PTE_W;
-      flags &= (~PTE_COW);
-
-      char *mem = kalloc();
-      char *pa = (char *)PTE2PA(*pte);
-      memmove(mem, pa, PGSIZE);
-      uvmunmap(p->pagetable, start_va, PGSIZE, 0);
-      // decrement old pa ref count.
-      dec_ref((void*)pa);
-      if (mappages(p->pagetable, start_va, PGSIZE, (uint64)mem, flags) != 0) {
-        p->killed = 1;
-        panic("ERROR in Trap while mapping.\n");
-      }
-    }
-  }
-
   else if ((which_dev = devintr()) != 0)
   {
     // ok
