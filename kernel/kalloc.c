@@ -56,13 +56,13 @@ pgindex(uint64 pa){
 
 inline
 void
-acquire_refcnt(a){
+acquire_refcnt(){
   acquire(&pagerefs.lock);
 }
 
 inline
 void
-release_refcnt(a){
+release_refcnt(){
   release(&pagerefs.lock);
 }
 
@@ -89,24 +89,26 @@ refcnt_incr(uint64 pa, int n){
 // which normally should have been returned by a
 // call to kalloc().  (The exception is when
 // initializing the allocator; see kinit above.)
-void
-kfree(void *pa)
-{
-  struct run *r;
 
-  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
-    panic("kfree");
+// ORIGINAL
+// void
+// kfree(void *pa)
+// {
+//   struct run *r;
 
-  // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
+//   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+//     panic("kfree");
 
-  r = (struct run*)pa;
+//   // Fill with junk to catch dangling refs.
+//   memset(pa, 1, PGSIZE);
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
-}
+//   r = (struct run*)pa;
+
+//   acquire(&kmem.lock);
+//   r->next = kmem.freelist;
+//   kmem.freelist = r;
+//   release(&kmem.lock);
+// }
 
 void
 kfree(void *pa)

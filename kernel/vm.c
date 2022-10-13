@@ -186,7 +186,6 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not a leaf");
     if(do_free){
       uint64 pa = PTE2PA(*pte);
-      // don't we have to check if refCount is 0?
       kfree((void*)pa);
     }
     *pte = 0;
@@ -351,7 +350,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem; 
 
   // we are getting each entry in the Page table (PTE) through walk
   for(i = 0; i < sz; i += PGSIZE){
@@ -378,17 +376,9 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
     // We maintain a count of the number of virtual pgs mapped to each physical pg.
     // so increment that.
-    add_ref((void*)pa);
-    
-    // The parent table addresses still show it as a Write page. We need to clear that and re-map it.
-    // Hence, we remove parent page table mapping.
-    uvmunmap(old, i, PGSIZE, 0);
-
-    // and then re-map the parent page table
-    if (mappages(old, i, PGSIZE, pa, flags) != 0) {
-      goto err;
+    refcnt_incr(pa,1);    
     }
-  }
+    return 0;
   err:
   uvmunmap(new, 0, i / PGSIZE, 1);
     return(-1);

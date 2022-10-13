@@ -75,7 +75,6 @@ void usertrap(void)
 
     // Get physial page address and correct flags.
     uint64 va = r_stval();
-    pte_t *pte;
 
     if(cowcopy(va) == - 1)
       p->killed = 1; 
