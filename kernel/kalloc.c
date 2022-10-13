@@ -115,22 +115,22 @@ kfree(void *pa)
 {
   struct run *r;
 
-  // page with refcnt  1 should not be freed
+  // page with refcnt > 1 should not be freed
   // acquire_refcnt();
-  acquire(&pagerefs.lock);
+  acquire_refcnt();
   if(pagerefs.counter[pgindex((uint64)pa)] > 1){
     pagerefs.counter[pgindex((uint64)pa)] -= 1;
-    release(&pagerefs.lock);
+    release_refcnt();
     return;
   }
 
-  // if(((uint64)pa % PGSIZE) != 0| | -char*)pa  end || (uint64)pa = PHYSTOP)
-  //   panic("kfree");
+  if(((uint64)pa % PGSIZE) != 0|| (char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("kfree");
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
   pagerefs.counter[pgindex((uint64)pa)] = 0;
-  release(&pagerefs.lock);
+  release_refcnt();
 
   r = (struct run*)pa;
 
@@ -160,9 +160,7 @@ kalloc(void)
 
   if (r)
   {
-    acquire(&pagerefs.lock);
-    pagerefs.counter[pgindex((uint64)r)] += 1;
-    release(&pagerefs.lock);
+    refcnt_incr((uint64)r, 1);
   }
     
   return (void*)r;
@@ -184,11 +182,7 @@ kalloc_initialise(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
 
   if (r)
-  {
-    acquire(&pagerefs.lock);
-    pagerefs.counter[pgindex((uint64)r)] = 1;
-    release(&pagerefs.lock);
-  }
+    refcnt_setter((uint64)r, 1);
     
   return (void*)r;
 }
