@@ -69,21 +69,6 @@ void usertrap(void)
     syscall();
   }
 
-
-  else if (r_scause() == 15) 
-  {
-    // Modify usertrap() to recognize page faults.
-    // When a page-fault occurs on a COW page, allocate a new page with kalloc(),
-    // copy the old page to the new page,
-    // and install the new page in the PTE with PTE_W set.
-
-    // Get physial page address and correct flags.
-    uint64 va = r_stval();
-
-    if(cowcopy(va) == - 1)
-      p->killed = 1; 
-  }
-
   else if ((which_dev = devintr()) != 0)
   {
     // ok
@@ -337,42 +322,4 @@ int devintr()
   {
     return 0;
   }
-}
-
-int
-cowcopy(uint64 va){
-  va = PGROUNDDOWN(va);
-  pagetable_t p = myproc()->pagetable;
-  pte_t* pte = walk(p, va, 0);
-  uint64 pa = PTE2PA(*pte);
-  uint flags = PTE_FLAGS(*pte);
-
-  if(!(flags & PTE_COW))
-  {
-    panic("Not Cow\n");
-    return -2; // not cow page
-  }
-
-  acquire_refcnt();
-  uint ref = refcnt_getter(pa);
-  if(ref > 1) {// ref  1, alloc a new page
-    char* mem = kalloc_initialise();
-    if(mem == 0)
-      goto bad;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(p, va, PGSIZE, (uint64)mem, (flags & (~PTE_COW)) | PTE_W) !=0){
-      kfree(mem);
-      goto bad;
-    }
-    refcnt_setter(pa, ref - 1);
-  }else{
-    // ref = 1, use this page directly
-    *pte = ((*pte) & (~PTE_COW)) | PTE_W;
-  }
-  release_refcnt();
-  return 0;
-
-  bad:
-  release_refcnt();
-  return -1;
 }

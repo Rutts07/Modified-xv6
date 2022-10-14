@@ -63,14 +63,6 @@ void            ramdiskrw(struct buf*);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
-uint64 pgindex(uint64 pa);
-void acquire_refcnt();
-void release_refcnt();
-void refcnt_setter(uint64 pa, int n);
-uint refcnt_getter(uint64 pa);
-void refcnt_incr(uint64 pa, int n);
-void * kalloc_initialise(void);
-
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -115,13 +107,13 @@ int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
 
+// functions for priority scheduling
+int             set_priority(int priority, int pid);          // alters the priority of a process
+int             dynamic_priority(struct proc *p);             // calculates the dynamic priority of a process
+
 // functions for waitx
 void            update_time(void);
 int             waitx(uint64 addr, int *rtime, int *wtime);
-
-// functions for Priority Based Scheduling
-int             set_priority(int priority, int pid);
-int             dynamic_priority(struct proc *p);
 
 // swtch.S
 void            swtch(struct context*, struct context*);
@@ -163,7 +155,6 @@ void            trapinit(void);
 void            trapinithart(void);
 extern struct spinlock tickslock;
 void            usertrapret(void);
-int cowcopy(uint64 va);
 
 // uart.c
 void            uartinit(void);

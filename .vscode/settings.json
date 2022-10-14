@@ -3,6 +3,7 @@
         "*.c": "c",
         "*main.c": "c",
         "*.html": "html",
-        "fcntl.h": "c"
+        "fcntl.h": "c",
+        "defs.h": "c"
     }
 }

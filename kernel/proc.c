@@ -10,6 +10,28 @@ struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 
+#ifdef LBS
+int lottery_scheduler(int total_tickets)
+{
+  // Take from http://stackoverflow.com/questions/1167253/implementation-of-rand
+  static unsigned int z1 = 12345, z2 = 12345, z3 = 12345, z4 = 12345;
+  unsigned int b;
+  b  = ((z1 << 6) ^ z1) >> 13;
+  z1 = ((z1 & 4294967294U) << 18) ^ b;
+  b  = ((z2 << 2) ^ z2) >> 27; 
+  z2 = ((z2 & 4294967288U) << 2) ^ b;
+  b  = ((z3 << 13) ^ z3) >> 21;
+  z3 = ((z3 & 4294967280U) << 7) ^ b;
+  b  = ((z4 << 3) ^ z4) >> 12;
+  z4 = ((z4 & 4294967168U) << 13) ^ b;
+
+  unsigned int random = (z1 ^ z2 ^ z3 ^ z4) / 2;
+
+  // return a number between 1 and total_tickets
+  return (random % total_tickets) + 1;
+}
+#endif
+
 #ifdef MLFQ
 struct Queue queue[MAX_QUEUES];
 
@@ -730,40 +752,45 @@ scheduler(void)
 
   #ifdef LBS
     struct proc *next = 0;
+
+    int total_tickets = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
-      if(p->state == RUNNABLE)
+
+      if (p->state == RUNNABLE)
+        total_tickets += p->tickets;
+
+      release(&p->lock);
+    }
+
+    // Probabilistic lottery
+    int winner = lottery_scheduler(total_tickets);
+
+    int counter = 0;
+    for(p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+
+      if (p->state == RUNNABLE)
       {
-        // choose the process with the highest number of tickets
-        if(next == 0 || p->tickets >= next->tickets)
+        counter += p->tickets;
+        if (next == 0 || counter >= winner)
         {
           if (next == 0)
-          {
             next = p;
-            continue;
-          }
 
-          // If the tickets are equal
-          if (p->tickets == next->tickets)
+          else
           {
-            // If the number of tickets is the same, choose the process with the earliest creation time
-            if (p->c_time < next->c_time)
-            {
-              release(&next->lock);
-              next = p;
-              continue;
-            }
+            release(&next->lock);
 
-            release(&p->lock);
-            continue;
+            // Don't release the lock of the chosen process
+            next = p;
+            break;
           }
 
-          // Don't release the lock of the chosen process, unless a better process is found
-          release(&next->lock);
-          next = p;
           continue;
         }
       }
+
       release(&p->lock);
     }
 

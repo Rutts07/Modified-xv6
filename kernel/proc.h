@@ -140,6 +140,10 @@ struct proc {
   #endif
 };
 
+#ifdef LBS
+int lottery_scheduler(int total_tickets);                 // returns a random number between 1 and total_tickets
+#endif
+
 #ifdef MLFQ
 struct Queue 
 {
