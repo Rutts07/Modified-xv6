@@ -151,6 +151,7 @@ UPROGS=\
 	$U/_schedulertest\
 	$U/_setpriority\
 	$U/_cowtest\
+	$U/_mlfq_test\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
