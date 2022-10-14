@@ -169,20 +169,21 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 int
 mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 {
-  uint64 a, last;
+  uint64 currAddr, last;
   pte_t *pte;
 
-  a = PGROUNDDOWN(va);
+  currAddr = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
-  for(;;){
-    if((pte = walk(pagetable, a, 1)) == 0)
+  while(1)
+  {
+    pte = walk(pagetable, currAddr, 1);
+    if(pte == 0)
       return -1;
-    // if(*pte & PTE_V)
-    //   panic("remap");
+
     *pte = PA2PTE(pa) | perm | PTE_V;
-    if(a == last)
+    if(currAddr == last)
       break;
-    a += PGSIZE;
+    currAddr += PGSIZE;
     pa += PGSIZE;
   }
   return 0;
@@ -368,13 +369,16 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   uint flags;
 
   // we are getting each entry in the Page table (PTE) through walk
-  for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walk(old, i, 0)) == 0)
+  for(i = 0; i < sz; i += PGSIZE)
+  {
+    pte = walk(old, i, 0);
+    if(pte == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     
     pa = PTE2PA(*pte);
+    
     flags = PTE_FLAGS(*pte);
 
     // set parent's page unwritable and give it COW flag
@@ -385,19 +389,17 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     flags &= (~PTE_W);    // remove the Write flag from the page. So only readable.
 
     // map the parent’s physical pages into the child
-    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){ 
-      //kfree(mem);
-      goto err;
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0)
+    { 
+      uvmunmap(new, 0, i / PGSIZE, 1);
+      return -1;
     }
 
     // We maintain a count of the number of virtual pgs mapped to each physical pg.
     // so increment that.
-    refcnt_incr(pa,1);    
-    }
-    return 0;
-  err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
-    return(-1);
+    pageref_incr(pa,1);    
+  }
+  return 0;
 }
 
 // mark a PTE invalid for user access.
@@ -445,17 +447,21 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
 
-  while(len > 0){
+  while(1)
+  {
+    if (len <= 0)
+      break;
+
     va0 = PGROUNDDOWN(dstva);
 
     if(va0 >= MAXVA)
       return -1;
     pte_t* pte = walk(pagetable, va0, 0);
-    if(pte && (*pte & PTE_COW) != 0){
-      // cow page
-      if(cowcopy(va0) != 0){
+    
+    if(pte && (*pte & PTE_COW) != 0)
+    {
+      if(copyOnWrite(va0) != 0)
         return -1;
-      }
     }
     pa0 = walkaddr(pagetable, va0);
 

@@ -79,7 +79,7 @@ void usertrap(void)
     // Get physial page address and correct flags.
     uint64 va = r_stval();
 
-    if(cowcopy(va) == - 1)
+    if(copyOnWrite(va) == - 1)
       p->killed = 1; 
   }
 
@@ -340,7 +340,8 @@ int devintr()
 
 
 int
-cowcopy(uint64 va){
+copyOnWrite(uint64 va)
+{
   va = PGROUNDDOWN(va);
   pagetable_t p = myproc()->pagetable;
   pte_t* pte = walk(p, va, 0);
@@ -350,29 +351,38 @@ cowcopy(uint64 va){
   if(!(flags & PTE_COW))
   {
     panic("Not Cow\n");
-    return -2; // not cow page
+    return -10; // not cow page
   }
 
-  acquire_refcnt();
-  uint ref = refcnt_getter(pa);
-  if(ref > 1) {// ref  1, alloc a new page
+  acquire_pagerefLock();
+  uint ref = pageref_getter(pa);
+
+  // This means that there are multiple processes using this page
+  // Hence we need to make a copy.
+  if(ref > 1) 
+  {
+    // create new page
     char* mem = kalloc_initialise();
     if(mem == 0)
-      goto bad;
+    {
+      release_pagerefLock();
+      return -1;
+    };
+
     memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(p, va, PGSIZE, (uint64)mem, (flags & (~PTE_COW)) | PTE_W) !=0){
+    if(mappages(p, va, PGSIZE, (uint64)mem, (flags & (~PTE_COW)) | PTE_W) !=0)
+    {
       kfree(mem);
-      goto bad;
+      release_pagerefLock();
+      return -1;
     }
-    refcnt_setter(pa, ref - 1);
-  }else{
-    // ref = 1, use this page directly
+    pageref_setter(pa, ref - 1);
+  }
+  // This means that there is only one process using this page so we can directly alter  
+  else{
+    // removing it as a cow page and making it a writable page
     *pte = ((*pte) & (~PTE_COW)) | PTE_W;
   }
-  release_refcnt();
+  release_pagerefLock();
   return 0;
-
-  bad:
-  release_refcnt();
-  return -1;
 }

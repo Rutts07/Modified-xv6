@@ -64,11 +64,11 @@ void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
 uint64          pgindex(uint64 pa);
-void            acquire_refcnt();
-void            release_refcnt();
-void            refcnt_setter(uint64 pa, int n);
-uint            refcnt_getter(uint64 pa);
-void            refcnt_incr(uint64 pa, int n);
+void            acquire_pagerefLock();
+void            release_pagerefLock();
+void            pageref_setter(uint64 pa, int n);
+uint            pageref_getter(uint64 pa);
+void            pageref_incr(uint64 pa, int n);
 void*           kalloc_initialise(void);
 
 // log.c
@@ -162,7 +162,7 @@ void            trapinit(void);
 void            trapinithart(void);
 extern struct spinlock tickslock;
 void            usertrapret(void);
-int             cowcopy(uint64 va);
+int             copyOnWrite(uint64 va);
 
 // uart.c
 void            uartinit(void);

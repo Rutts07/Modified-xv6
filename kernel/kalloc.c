@@ -56,29 +56,29 @@ pgindex(uint64 pa){
 
 inline
 void
-acquire_refcnt(){
+acquire_pagerefLock(){
   acquire(&pagerefs.lock);
 }
 
 inline
 void
-release_refcnt(){
+release_pagerefLock(){
   release(&pagerefs.lock);
 }
 
 void
-refcnt_setter(uint64 pa, int n){
+pageref_setter(uint64 pa, int n){
   pagerefs.counter[pgindex((uint64)pa)] = n;
 }
 
 inline
 uint
-refcnt_getter(uint64 pa){
+pageref_getter(uint64 pa){
   return pagerefs.counter[pgindex(pa)];
 }
 
 void
-refcnt_incr(uint64 pa, int n){
+pageref_incr(uint64 pa, int n){
   acquire(&pagerefs.lock);
   pagerefs.counter[pgindex(pa)] += n;
   release(&pagerefs.lock);
@@ -115,12 +115,11 @@ kfree(void *pa)
 {
   struct run *r;
 
-  // page with refcnt > 1 should not be freed
-  // acquire_refcnt();
-  acquire_refcnt();
+  // page with pageref > 1 should not be freed
+  acquire_pagerefLock();
   if(pagerefs.counter[pgindex((uint64)pa)] > 1){
     pagerefs.counter[pgindex((uint64)pa)] -= 1;
-    release_refcnt();
+    release_pagerefLock();
     return;
   }
 
@@ -130,7 +129,7 @@ kfree(void *pa)
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
   pagerefs.counter[pgindex((uint64)pa)] = 0;
-  release_refcnt();
+  release_pagerefLock();
 
   r = (struct run*)pa;
 
@@ -176,7 +175,7 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
 
   if (r)
-    refcnt_incr((uint64)r, 1);
+    pageref_incr((uint64)r, 1);
     
   return (void*)r;
 }
@@ -197,7 +196,7 @@ kalloc_initialise(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
 
   if (r)
-    refcnt_setter((uint64)r, 1);
+    pageref_setter((uint64)r, 1);
     
   return (void*)r;
 }
