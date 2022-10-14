@@ -158,13 +158,17 @@ sys_settickets(void)
   int tickets;
 
   argint(0, &tickets);
+
+  // A process can only raise its tickets and not lower them
+  if (tickets < myproc()->tickets)
+    return -1;
+
   myproc()->tickets = tickets;
   return 0;
   #endif
 
   return -1;
 }
-
 
 uint64
 sys_waitx(void)
